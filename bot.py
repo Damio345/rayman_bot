@@ -507,4 +507,4 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bank_details))
 
     print("✅ Бот запущен! Тарифы: 50, 100, 150, 200 ₽. Бонус за 100, 150, 200 ₽.")
-    app.run_polling()
+    app.run_polling(allowed_updates=["message", "callback_query"])
