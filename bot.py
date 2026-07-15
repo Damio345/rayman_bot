@@ -26,14 +26,6 @@ cursor.execute("""
 """)
 conn.commit()
 
-FREE_PROMPTS = [
-    "киберпанк, неоновый дождь, фотореализм",
-    "эльфийский лес, магия, утренний туман",
-    "дракон в горах, эпическая фэнтези-атмосфера",
-    "девушка с зонтом в дождливом городе, меланхолия",
-    "космическая станция, вид на Землю, реализм"
-]
-
 PROMPTS_3 = [
     "древний замок в грозу, магия, молнии, 8K",
     "кибер-самурай с катаной, неоновый город, ночь",
@@ -145,11 +137,14 @@ async def start(update: Update, context):
     first_name = user.first_name or "друг"
     user_id = user.id
     add_user(user_id, first_name)
+
+    welcome_prompts = random.sample(PROMPTS_3, 3)
+    welcome_text = "🎨 Вот твои 3 промпта:\n\n" + "\n".join(f"• {p}" for p in welcome_prompts)
+
     await update.message.reply_text(
-        f"🤖 Привет, {first_name}!\n"
-        "Я генерирую промпты для нейросетей.\n\n"
-        "🎨 Нажми «Получить промпт» — получишь 3 случайных промпта (бесплатно).\n"
-        "💰 Купи тариф и сможешь генерировать промпты на ЛЮБУЮ тему!\n\n"
+        f"🤖 Привет, {first_name}!\n\n"
+        f"{welcome_text}\n\n"
+        "💰 Купи тариф, чтобы получать больше промптов и генерировать на ЛЮБУЮ тему!\n"
         "   • 50 ₽ → 3 промпта\n"
         "   • 100 ₽ → 5 промптов\n"
         "   • 150 ₽ → 7 промптов\n"
@@ -182,8 +177,7 @@ async def handle_text(update: Update, context):
         else:
             await update.message.reply_text(
                 "❌ У вас нет доступа к генерации по темам.\n"
-                "Купите тариф 100, 150 или 200 ₽, чтобы получить доступ к ЛЮБЫМ темам!\n"
-                "Нажмите «💎 Купить доступ».",
+                "Купите тариф 100, 150 или 200 ₽!",
                 reply_markup=get_main_keyboard(user_id)
             )
 
@@ -203,7 +197,7 @@ async def clear_chat(update: Update, context):
         f"🧹 Чат очищен! Удалено {deleted} сообщений.\n\n"
         f"🤖 Привет, {first_name}!\n"
         "Я генерирую промпты для нейросетей.\n\n"
-        "🎨 Нажми «Получить промпт» — получишь случайные промпты.\n"
+        "🎨 Нажми «Получить промпт» — получишь промпты.\n"
         "💰 Купи тариф и сможешь генерировать промпты на ЛЮБУЮ тему!",
         reply_markup=get_main_keyboard(user_id)
     )
@@ -227,7 +221,7 @@ async def generate_prompts(update: Update, context):
         elif count == 20:
             prompts = PROMPTS_10 * 2 + PROMPTS_5
         else:
-            prompts = FREE_PROMPTS
+            prompts = PROMPTS_3
         picked = random.sample(prompts, min(count, len(prompts)))
         text = "🎨 Твои промпты:\n\n" + "\n".join(f"• {p}" for p in picked)
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")]]))
@@ -247,7 +241,7 @@ async def generate_prompts(update: Update, context):
         prompts = PROMPTS_3
     else:
         count = 3
-        prompts = FREE_PROMPTS
+        prompts = PROMPTS_3
 
     picked = random.sample(prompts, min(count, len(prompts)))
     text = "🎨 Твои промпты:\n\n" + "\n".join(f"• {p}" for p in picked)
@@ -329,7 +323,7 @@ async def confirm_payment(update: Update, context):
     elif level == 100:
         count = 5
         prompts = PROMPTS_5
-        msg = f"✅ Тариф 100 ₽ подтверждён! У вас доступно {count} промптов. Теперь вы можете получить промпт на любую тему!"
+        msg = f"✅ Тариф 100 ₽ подтвержден! У вас доступно {count} промптов. Теперь вы можете получить промпт на любую тему!"
     elif level == 150:
         count = 7
         prompts = PROMPTS_7
