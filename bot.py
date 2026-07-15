@@ -20,10 +20,6 @@ cursor.execute("""
         purchased_100 INTEGER DEFAULT 0,
         purchased_150 INTEGER DEFAULT 0,
         purchased_200 INTEGER DEFAULT 0,
-        referrer_id INTEGER,
-        bonus INTEGER DEFAULT 0,
-        bonus_paid INTEGER DEFAULT 0,
-        bank_details TEXT DEFAULT '',
         reg_date TEXT,
         is_admin INTEGER DEFAULT 0
     )
@@ -68,10 +64,10 @@ def get_user(user_id):
     cursor.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     return cursor.fetchone()
 
-def add_user(user_id, name, referrer_id=None):
+def add_user(user_id, name):
     if not get_user(user_id):
-        cursor.execute("INSERT INTO users (user_id, name, referrer_id, reg_date) VALUES (?, ?, ?, ?)",
-                       (user_id, name, referrer_id, datetime.now().isoformat()))
+        cursor.execute("INSERT INTO users (user_id, name, reg_date) VALUES (?, ?, ?)",
+                       (user_id, name, datetime.now().isoformat()))
         conn.commit()
 
 def set_purchased(user_id, level):
@@ -91,36 +87,12 @@ def get_purchased(user_id):
         return user[2], user[3], user[4], user[5]
     return 0, 0, 0, 0
 
-def add_bonus(user_id, amount):
-    cursor.execute("UPDATE users SET bonus = bonus + ? WHERE user_id = ?", (amount, user_id))
-    conn.commit()
-
-def mark_bonus_paid(user_id):
-    cursor.execute("UPDATE users SET bonus = 0, bonus_paid = 1 WHERE user_id = ?", (user_id,))
-    conn.commit()
-
-def set_bank_details(user_id, details):
-    cursor.execute("UPDATE users SET bank_details = ? WHERE user_id = ?", (details, user_id))
-    conn.commit()
-
 def get_stats():
     cursor.execute("SELECT COUNT(*) FROM users")
     total_users = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM users WHERE purchased_100 = 1 OR purchased_150 = 1 OR purchased_200 = 1")
     total_purchased = cursor.fetchone()[0]
-    cursor.execute("SELECT SUM(bonus) FROM users")
-    total_bonus = cursor.fetchone()[0] or 0
-    return total_users, total_purchased, total_bonus
-
-def get_referrals():
-    cursor.execute("""
-        SELECT u1.user_id, u1.name, u2.user_id, u2.name, u1.bonus, u1.bonus_paid, u1.bank_details
-        FROM users u1
-        JOIN users u2 ON u1.referrer_id = u2.user_id
-        WHERE (u1.purchased_100 = 1 OR u1.purchased_150 = 1 OR u1.purchased_200 = 1)
-        AND (u1.bonus > 0 OR u1.bonus_paid = 1)
-    """)
-    return cursor.fetchall()
+    return total_users, total_purchased
 
 def get_admin():
     cursor.execute("SELECT user_id FROM users WHERE is_admin = 1")
@@ -139,7 +111,7 @@ def is_admin(user_id):
 def get_main_keyboard(user_id):
     keyboard = [
         ["🎨 Сгенерировать картинку", "💎 Купить доступ"],
-        ["👥 Реферальная ссылка", "🧹 Очистить чат"]
+        ["🧹 Очистить чат"]
     ]
     if is_admin(user_id):
         keyboard.append(["⚙️ Админ-панель"])
@@ -149,13 +121,7 @@ async def start(update: Update, context):
     user = update.effective_user
     first_name = user.first_name or "друг"
     user_id = user.id
-    ref_id = None
-    if context.args and context.args[0].startswith("ref_"):
-        try:
-            ref_id = int(context.args[0].split("_")[1])
-        except:
-            pass
-    add_user(user_id, first_name, ref_id)
+    add_user(user_id, first_name)
     await update.message.reply_text(
         f"🤖 Привет, {first_name}!\n"
         "Я генерирую промпты для нейросетей.\n\n"
@@ -165,7 +131,6 @@ async def start(update: Update, context):
         "   • 100 ₽ → 5 промптов\n"
         "   • 150 ₽ → 7 промптов\n"
         "   • 200 ₽ → 10 промптов\n\n"
-        "👥 Приведи друга — он оплачивает тариф 100, 150 или 200 ₽, а ты получаешь 100 ₽ бонуса!\n"
         "Оплата по ссылке — быстро и безопасно.",
         reply_markup=get_main_keyboard(user_id)
     )
@@ -177,8 +142,6 @@ async def handle_text(update: Update, context):
         await generate_prompts(update, context)
     elif text == "💎 Купить доступ":
         await buy_menu(update, context)
-    elif text == "👥 Реферальная ссылка":
-        await referral_link(update, context)
     elif text == "🧹 Очистить чат":
         await clear_chat(update, context)
     elif text == "⚙️ Админ-панель" and is_admin(user_id):
@@ -188,7 +151,7 @@ async def handle_text(update: Update, context):
 
 async def clear_chat(update: Update, context):
     user_id = update.effective_user.id
-    for i in range(10):
+    for i in range(30):
         try:
             await context.bot.delete_message(chat_id=user_id, message_id=update.message.message_id - i)
         except:
@@ -288,11 +251,6 @@ async def confirm_payment(update: Update, context):
         await update.message.reply_text("❌ Доступны только тарифы: 50, 100, 150, 200")
         return
     set_purchased(target_user, level)
-    if level in [100, 150, 200]:
-        user = get_user(target_user)
-        if user and user[5]:
-            add_bonus(user[5], 100)
-            await context.bot.send_message(user[5], "🎉 Твой друг оплатил тариф! Ты получил 100 ₽ бонуса. Добавь реквизиты в меню.")
     if level == 50:
         count = 3
         prompts = PROMPTS_3
@@ -335,49 +293,6 @@ async def more_prompts(update: Update, context):
     text = "🔥 Свежие промпты:\n\n" + "\n".join(f"• {p}" for p in picked)
     await update.message.reply_text(text, reply_markup=get_main_keyboard(user_id))
 
-async def referral_link(update: Update, context):
-    user_id = update.effective_user.id
-    bot_username = (await context.bot.get_me()).username
-    link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-    keyboard = [
-        [InlineKeyboardButton("📋 Скопировать ссылку", url=link)],
-        [InlineKeyboardButton("💰 Добавить реквизиты", callback_data="add_bank")],
-        [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")],
-    ]
-    text = (
-        f"👥 Твоя реферальная ссылка:\n{link}\n\n"
-        "📌 ИНСТРУКЦИЯ:\n"
-        "1. Отправь ссылку другу.\n"
-        "2. Друг оплачивает тариф 100, 150 или 200 ₽.\n"
-        "3. После оплаты он пишет /confirm.\n"
-        "4. Ты получаешь 100 ₽ бонуса.\n"
-        "5. Добавь реквизиты для выплаты.\n\n"
-        "⚠️ Бонус НЕ начисляется за тариф 50 ₽!"
-    )
-    if update.callback_query:
-        query = update.callback_query
-        await query.answer()
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def add_bank_details(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
-        "📝 Введи свои реквизиты (номер карты или телефон):",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Назад", callback_data="ref")]])
-    )
-    context.user_data['awaiting_bank'] = True
-
-async def handle_bank_details(update: Update, context):
-    if not context.user_data.get('awaiting_bank'):
-        return
-    user_id = update.effective_user.id
-    set_bank_details(user_id, update.message.text)
-    context.user_data['awaiting_bank'] = False
-    await update.message.reply_text("✅ Реквизиты сохранены!", reply_markup=get_main_keyboard(user_id))
-
 async def back_to_menu(update: Update, context):
     query = update.callback_query
     await query.answer()
@@ -390,17 +305,15 @@ async def admin_panel(update: Update, context):
     if not is_admin(user_id):
         await update.message.reply_text("⛔ Доступ запрещён.")
         return
-    total_users, total_purchased, total_bonus = get_stats()
+    total_users, total_purchased = get_stats()
     text = (
         "⚙️ Админ-панель\n\n"
         f"👥 Всего пользователей: {total_users}\n"
-        f"✅ Купили тариф 100, 150 или 200 ₽: {total_purchased}\n"
-        f"💰 Общий бонус к выплате: {total_bonus} ₽"
+        f"✅ Купили тариф 100, 150 или 200 ₽: {total_purchased}"
     )
     keyboard = [
         [InlineKeyboardButton("📊 Обновить статистику", callback_data="admin")],
         [InlineKeyboardButton("🎨 Бесплатные промпты (админ)", callback_data="admin_free")],
-        [InlineKeyboardButton("👥 Рефералы", callback_data="referrals")],
         [InlineKeyboardButton("📝 Список покупателей", callback_data="buyers")],
         [InlineKeyboardButton("🔙 Назад в меню", callback_data="menu")],
     ]
@@ -423,36 +336,6 @@ async def admin_free_prompts(update: Update, context):
         [InlineKeyboardButton("🔙 Назад", callback_data="admin")],
     ]
     await query.edit_message_text("🎨 Выбери количество промптов (бесплатно для админа):", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def referrals_list(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    referrals = get_referrals()
-    if not referrals:
-        await query.edit_message_text("📭 Пока нет рефералов.")
-        return
-    text = "👥 Рефералы:\n\n"
-    keyboard = []
-    for ref in referrals:
-        user_id, name, referrer_id, referrer_name, bonus, paid, bank = ref
-        status = "✅ Выплачено" if paid else f"💰 {bonus} ₽ (не выплачено)"
-        bank_info = f"🏦 Реквизиты: {bank}" if bank else "❌ Реквизиты не добавлены"
-        text += f"• {name} привёл {referrer_name}\n   {status}\n   {bank_info}\n\n"
-        if not paid:
-            keyboard.append([InlineKeyboardButton(f"✅ Выплачено {name}", callback_data=f"pay_{user_id}")])
-    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def pay_bonus(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    user_id = int(query.data.split("_")[1])
-    mark_bonus_paid(user_id)
-    try:
-        await context.bot.send_message(user_id, "🎉 Твой бонус 100 ₽ выплачен! Спасибо!")
-    except:
-        pass
-    await query.edit_message_text("✅ Бонус отмечен как выплаченный.")
-    await referrals_list(update, context)
 
 async def buyers_list(update: Update, context):
     query = update.callback_query
@@ -479,7 +362,6 @@ async def set_admin_command(update: Update, context):
         "Ты можешь:\n"
         "• Смотреть статистику\n"
         "• Получать промпты бесплатно (5, 7, 10, 15, 20 шт)\n"
-        "• Управлять рефералами и выплатами\n"
         "• Открывать доступ пользователям по /confirm"
     )
 
@@ -495,16 +377,11 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(buy_100, pattern="buy_100"))
     app.add_handler(CallbackQueryHandler(buy_150, pattern="buy_150"))
     app.add_handler(CallbackQueryHandler(buy_200, pattern="buy_200"))
-    app.add_handler(CallbackQueryHandler(referral_link, pattern="ref"))
-    app.add_handler(CallbackQueryHandler(add_bank_details, pattern="add_bank"))
     app.add_handler(CallbackQueryHandler(back_to_menu, pattern="menu"))
     app.add_handler(CallbackQueryHandler(admin_panel, pattern="admin"))
     app.add_handler(CallbackQueryHandler(admin_free_prompts, pattern="admin_free"))
-    app.add_handler(CallbackQueryHandler(referrals_list, pattern="referrals"))
-    app.add_handler(CallbackQueryHandler(pay_bonus, pattern="pay_"))
     app.add_handler(CallbackQueryHandler(buyers_list, pattern="buyers"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_bank_details))
 
-    print("✅ Бот запущен! Тарифы: 50, 100, 150, 200 ₽. Бонус за 100, 150, 200 ₽.")
+    print("✅ Бот запущен! Тарифы: 50, 100, 150, 200 ₽.")
     app.run_polling(allowed_updates=["message", "callback_query"])
